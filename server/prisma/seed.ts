@@ -4,57 +4,38 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
-console.log("Script start");
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables
+// Load env
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
-console.log("__filename:", __filename);
-console.log("__dirname:", __dirname);
-
-// Set DATABASE_URL if not already set
+// Fallback for local quick tests
 if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL =
     "postgresql://postgres:password@localhost:5432/project_management_db?schema=public";
 }
 
-console.log("DATABASE_URL:", process.env.DATABASE_URL);
-
 const prisma = new PrismaClient();
-console.log("Prisma client initialized");
 
 async function deleteAllData(orderedFileNames: string[]) {
-  console.log("deleteAllData start");
-  const modelNames = orderedFileNames.map((fileName) => {
-    return path.basename(fileName, path.extname(fileName));
-  });
-  console.log("Model names for deletion:", modelNames);
-
+  const modelNames = orderedFileNames.map((f) =>
+    path.basename(f, path.extname(f))
+  );
   for (const modelName of modelNames.reverse()) {
-    console.log(`Deleting data for model: ${modelName}`);
-    const model: any = prisma[modelName as keyof typeof prisma];
-    if (model) {
-      try {
-        await model.deleteMany({});
-        console.log(`Cleared data from ${modelName}`);
-      } catch (error) {
-        console.error(`Error clearing data from ${modelName}:`, error);
-        throw error; // re-throw to be caught by the final catch block
-      }
-    } else {
-      console.error(`Model ${modelName} not found on prisma client`);
+    const delegate: any = (prisma as any)[modelName];
+    if (!delegate) {
+      console.warn(
+        `[deleteAllData] Model '${modelName}' not found on Prisma client; skipping.`
+      );
+      continue;
     }
+    await delegate.deleteMany({});
   }
-  console.log("deleteAllData end");
 }
 
 async function main() {
-  console.log("main start");
   const dataDirectory = path.join(__dirname, "seedData");
-  console.log("Data directory:", dataDirectory);
 
   const orderedFileNames = [
     "team.json",
@@ -67,167 +48,169 @@ async function main() {
     "taskAssignment.json",
   ];
 
-  console.log("Ordered file names for seeding:", orderedFileNames);
-
+  // 0) Clean existing data (reverse order within helper)
   await deleteAllData(orderedFileNames);
-  console.log("deleteAllData finished");
 
-  // Step 1: Create teams without user references first
-  console.log("Step 1: Creating teams without user references");
-  const teamData = JSON.parse(fs.readFileSync(path.join(dataDirectory, "team.json"), "utf-8"));
-  const teamsWithoutUsers = teamData.map((team: any) => ({
-    teamName: team.teamName
+  // ---------- 1) TEAMS (create first) ----------
+  const teamSeed = JSON.parse(
+    fs.readFileSync(path.join(dataDirectory, "team.json"), "utf-8")
+  );
+  // Your team.json appears to reference users later; create teams first without user refs.
+  const teamsWithoutUsers = teamSeed.map((t: any) => ({
+    teamName: t.teamName,
   }));
-  
-  const createdTeams = [];
-  for (const teamData of teamsWithoutUsers) {
-    console.log(`Creating team:`, teamData);
-    const createdTeam = await prisma.team.create({ data: teamData });
-    createdTeams.push(createdTeam);
-    console.log(`Created team with ID:`, createdTeam.id);
-  }
-  console.log("Teams created successfully");
 
-  // Step 2: Create users
-  console.log("Step 2: Creating users");
-  const userData = JSON.parse(fs.readFileSync(path.join(dataDirectory, "user.json"), "utf-8"));
-  for (let i = 0; i < userData.length; i++) {
-    const user = userData[i];
-    // Map the teamId from the seed data to the actual created team ID
-    const actualTeamId = createdTeams[user.teamId - 1]?.id;
+  const createdTeams = await Promise.all(
+    teamsWithoutUsers.map((data: any) => prisma.team.create({ data }))
+  );
+
+  // Map: seed index (1-based) -> actual team.id
+  const teamIdMap = new Map<number, string>();
+  createdTeams.forEach((t, idx) => {
+    teamIdMap.set(idx + 1, t.id);
+  });
+
+  // ---------- 2) USERS (map teamId using teamIdMap) ----------
+  const userSeed = JSON.parse(
+    fs.readFileSync(path.join(dataDirectory, "user.json"), "utf-8")
+  );
+
+  const createdUsers = [];
+  for (const user of userSeed) {
+    const actualTeamId = teamIdMap.get(user.teamId);
     if (!actualTeamId) {
-      console.error(`No team found for teamId ${user.teamId}`);
+      console.warn(
+        `[users] No team found for seed teamId=${user.teamId}; skipping user '${
+          user?.email ?? ""
+        }'`
+      );
       continue;
     }
-    
-    const userWithCorrectTeamId = {
-      ...user,
-      teamId: actualTeamId
-    };
-    
-    console.log(`Creating user:`, userWithCorrectTeamId);
-    await prisma.user.create({ data: userWithCorrectTeamId });
+    const toCreate = { ...user, teamId: actualTeamId };
+    const u = await prisma.user.create({ data: toCreate });
+    createdUsers.push(u);
   }
-  console.log("Users created successfully");
 
-  // Step 3: Update teams with user references
-  console.log("Step 3: Updating teams with user references");
-  const originalTeamData = JSON.parse(fs.readFileSync(path.join(dataDirectory, "team.json"), "utf-8"));
-  for (let i = 0; i < originalTeamData.length; i++) {
-    const team = originalTeamData[i];
-    const teamId = createdTeams[i].id; // Use the actual created team ID
-    console.log(`Updating team ${teamId} with user references`);
+  // Map: seed user index (1-based) -> actual user.userId (assuming your PK is 'userId')
+  // If your PK is 'id' instead, change below to u.id
+  const userIdMap = new Map<number, number>();
+  createdUsers.forEach((u, idx) => {
+    // adjust this if your model uses 'id' instead of 'userId'
+    const actual = (u as any).userId ?? (u as any).id;
+    userIdMap.set(idx + 1, Number(actual));
+  });
+
+  // ---------- 3) UPDATE TEAMS with user references (map seed user indices -> actual user IDs) ----------
+  // team.json likely has productOwnerUserId / projectManagerUserId as seed indices
+  for (let i = 0; i < teamSeed.length; i++) {
+    const createdTeam = createdTeams[i];
+    if (!createdTeam) {
+      console.warn(`[teams update] No created team at index ${i}; skipping`);
+      continue;
+    }
+
+    const seedTeam = teamSeed[i];
+
+    const productOwnerReal = seedTeam.productOwnerUserId
+      ? userIdMap.get(seedTeam.productOwnerUserId)
+      : undefined;
+    const projectManagerReal = seedTeam.projectManagerUserId
+      ? userIdMap.get(seedTeam.projectManagerUserId)
+      : undefined;
+
     await prisma.team.update({
-      where: { id: teamId },
+      where: { id: createdTeam.id },
       data: {
-        productOwnerUserId: team.productOwnerUserId,
-        projectManagerUserId: team.projectManagerUserId
-      }
+        ...(productOwnerReal ? { productOwnerUserId: productOwnerReal } : {}),
+        ...(projectManagerReal
+          ? { projectManagerUserId: projectManagerReal }
+          : {}),
+      },
     });
   }
-  console.log("Teams updated with user references");
 
-  // Step 4: Create projects
-  console.log("Step 4: Creating projects");
-  const projectData = JSON.parse(fs.readFileSync(path.join(dataDirectory, "project.json"), "utf-8"));
-  for (const project of projectData) {
-    console.log(`Creating project:`, project);
+  // ---------- 4) PROJECTS ----------
+  const projectSeed = JSON.parse(
+    fs.readFileSync(path.join(dataDirectory, "project.json"), "utf-8")
+  );
+  for (const project of projectSeed) {
     await prisma.project.create({ data: project });
   }
-  console.log("Projects created successfully");
 
-  // Step 5: Create project teams
-  console.log("Step 5: Creating project teams");
-  const projectTeamData = JSON.parse(fs.readFileSync(path.join(dataDirectory, "projectTeam.json"), "utf-8"));
-  for (const projectTeam of projectTeamData) {
-    // Map the teamId from the seed data to the actual created team ID
-    const actualTeamId = createdTeams[projectTeam.teamId - 1]?.id;
+  // ---------- 5) PROJECT TEAMS (map teamId) ----------
+  const projectTeamSeed = JSON.parse(
+    fs.readFileSync(path.join(dataDirectory, "projectTeam.json"), "utf-8")
+  );
+
+  for (const pt of projectTeamSeed) {
+    const actualTeamId = teamIdMap.get(pt.teamId);
     if (!actualTeamId) {
-      console.error(`No team found for teamId ${projectTeam.teamId}`);
+      console.warn(
+        `[projectTeam] No team found for seed teamId=${pt.teamId}; skipping`
+      );
       continue;
     }
-    
-    const projectTeamWithCorrectTeamId = {
-      ...projectTeam,
-      teamId: actualTeamId
-    };
-    
-    console.log(`Creating project team:`, projectTeamWithCorrectTeamId);
-    await prisma.projectTeam.create({ data: projectTeamWithCorrectTeamId });
+    const toCreate = { ...pt, teamId: actualTeamId };
+    await prisma.projectTeam.create({ data: toCreate });
   }
-  console.log("Project teams created successfully");
 
-  // Step 6: Create remaining records
-  const remainingFiles = ["task.json", "attachment.json", "comment.json", "taskAssignment.json"];
-  
-  // Get all users to map user IDs
-  const allUsers = await prisma.user.findMany();
-  console.log(`Found ${allUsers.length} users for ID mapping`);
-  
+  // ---------- 6) REMAINING (map all user references via userIdMap) ----------
+  const remainingFiles = [
+    "task.json",
+    "attachment.json",
+    "comment.json",
+    "taskAssignment.json",
+  ];
+
   for (const fileName of remainingFiles) {
-    console.log(`Processing file: ${fileName}`);
     const filePath = path.join(dataDirectory, fileName);
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-    const jsonData = JSON.parse(fileContent);
+    const jsonData = JSON.parse(fs.readFileSync(filePath, "utf-8"));
     const modelName = path.basename(fileName, path.extname(fileName));
-    const model: any = prisma[modelName as keyof typeof prisma];
+    const delegate: any = (prisma as any)[modelName];
 
-    if (model) {
-      try {
-        for (const data of jsonData) {
-          // Map user IDs for records that reference users
-          let mappedData = { ...data };
-          
-          if (data.authorUserId) {
-            const actualAuthorId = allUsers[data.authorUserId - 1]?.userId;
-            if (actualAuthorId) {
-              mappedData.authorUserId = actualAuthorId;
-            }
-          }
-          
-          if (data.assignedUserId) {
-            const actualAssignedId = allUsers[data.assignedUserId - 1]?.userId;
-            if (actualAssignedId) {
-              mappedData.assignedUserId = actualAssignedId;
-            }
-          }
-          
-          if (data.userId) {
-            const actualUserId = allUsers[data.userId - 1]?.userId;
-            if (actualUserId) {
-              mappedData.userId = actualUserId;
-            }
-          }
-          
-          if (data.uploadedById) {
-            const actualUploadedById = allUsers[data.uploadedById - 1]?.userId;
-            if (actualUploadedById) {
-              mappedData.uploadedById = actualUploadedById;
-            }
-          }
-          
-          console.log(`Creating data for ${modelName}:`, mappedData);
-          await model.create({ data: mappedData });
-        }
-        console.log(`Seeded ${modelName} with data from ${fileName}`);
-      } catch (error) {
-        console.error(`Error seeding data for ${modelName}:`, error);
-        throw error;
+    if (!delegate) {
+      console.warn(
+        `[${fileName}] Model '${modelName}' not found on Prisma client; skipping.`
+      );
+      continue;
+    }
+
+    for (const row of jsonData) {
+      const mapped = { ...row };
+
+      const maybeMap = (seedVal?: number) =>
+        typeof seedVal === "number" ? userIdMap.get(seedVal) : undefined;
+
+      if (row.authorUserId) {
+        const v = maybeMap(row.authorUserId);
+        if (v) mapped.authorUserId = v;
       }
-    } else {
-      console.error(`Model ${modelName} not found on prisma client`);
+      if (row.assignedUserId) {
+        const v = maybeMap(row.assignedUserId);
+        if (v) mapped.assignedUserId = v;
+      }
+      if (row.userId) {
+        const v = maybeMap(row.userId);
+        if (v) mapped.userId = v;
+      }
+      if (row.uploadedById) {
+        const v = maybeMap(row.uploadedById);
+        if (v) mapped.uploadedById = v;
+      }
+
+      await delegate.create({ data: mapped });
     }
   }
-  console.log("main end");
+
+  console.log("Seeding finished successfully.");
 }
 
 main()
   .then(async () => {
-    console.log("Seeding finished successfully.");
     await prisma.$disconnect();
   })
   .catch(async (e) => {
-    console.error("An error occurred during seeding:", e);
+    console.error("Seeding error:", e);
     await prisma.$disconnect();
     process.exit(1);
   });
