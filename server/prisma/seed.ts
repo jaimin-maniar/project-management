@@ -11,10 +11,6 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
 // Fallback for local quick tests
-if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL =
-    "postgresql://postgres:password@localhost:5432/project_management_db?schema=public";
-}
 
 const prisma = new PrismaClient();
 
