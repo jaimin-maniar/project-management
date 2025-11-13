@@ -10,6 +10,7 @@ import ModalNewTask from "@/components/ModalNewTask";
 const ProjectHeaderWrapper = ({ id }: { id: string }) => {
   const [activeTab, setActiveTab] = useState("Board");
   const [isModalNewTaskOpen, setIsModalNewTaskOpen] = useState(false);
+
   return (
     <div>
       {/* Modal New Task */}

@@ -4,14 +4,14 @@ import { DisplayOption, Gantt, ViewMode } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
 import React, { useMemo, useState } from "react";
 
-type Props = {
+type BoardProps = {
   id: string;
   setIsModalNewTaskOpen: (isOpen: boolean) => void;
 };
 
 type TaskTypeItems = "task" | "milestone" | "project";
 
-const Timeline = ({ id, setIsModalNewTaskOpen }: Props) => {
+const Timeline = ({ id, setIsModalNewTaskOpen }: BoardProps) => {
   const isDarkMode = useAppSelector((state) => state.global.isDarkMode);
   const {
     data: tasks,
@@ -49,7 +49,7 @@ const Timeline = ({ id, setIsModalNewTaskOpen }: Props) => {
 
   if (isLoading) return <div>Loading...</div>;
   if (error || !tasks) return <div>An error occurred while fetching tasks</div>;
-
+  if (ganttTasks.length === 0) return <div className="p-4">No Tasks</div>;
   return (
     <div className="px-4 xl:px-6">
       <div className="flex flex-wrap items-center justify-between gap-2 py-5">

@@ -8,12 +8,12 @@ import Image from "next/image";
 
 const Users: React.FC = () => {
   const { data, isLoading, isError } = useGetUsersQuery();
-
   const columns: GridColDef[] = [
     {
       field: "profilePictureUrl",
       headerName: "Profile",
       width: 100,
+
       renderCell: (params) => (
         <div
           style={{

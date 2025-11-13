@@ -21,39 +21,65 @@ const ModalNewTask = ({ isOpen, onClose, id = null }: Props) => {
   const [authorUserId, setAuthorUserId] = useState("");
   const [assignedUserId, setAssignedUserId] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const handleSubmit = async () => {
-    if (!title || !authorUserId || id !== null || projectId) return;
-    const formattedStartDate = formatISO(new Date(startDate), {
-      representation: "complete",
-    });
-    const formattedDueDate = formatISO(new Date(dueDate), {
-      representation: "complete",
-    });
-    await createTask({
-      projectId: id !== null ? Number(id) : Number(projectId),
-      title,
-      description,
-      status,
-      priority,
-      tags,
-      startDate: formattedStartDate,
-      dueDate: formattedDueDate,
-      authorUserId: parseInt(authorUserId),
-      assignedUserId: parseInt(assignedUserId),
-    });
+    const hasProject = id != null || projectId.trim() !== "";
+    if (!title.trim() || !authorUserId.trim() || !hasProject) return;
+
+    const formattedStartDate = startDate
+      ? formatISO(new Date(startDate), { representation: "complete" })
+      : null;
+    const formattedDueDate = dueDate
+      ? formatISO(new Date(dueDate), { representation: "complete" })
+      : null;
+
+    try {
+      const task = await createTask({
+        projectId: id != null ? Number(id) : Number(projectId),
+        title,
+        description,
+        status,
+        priority,
+        tags,
+        startDate: formattedStartDate ?? undefined,
+        dueDate: formattedDueDate ?? undefined,
+        authorUserId: parseInt(authorUserId, 10),
+        assignedUserId: parseInt(assignedUserId || "0", 10) || undefined,
+      });
+
+      if (task) {
+        setSuccessMessage("✅ Task created successfully!");
+        setTimeout(() => {
+          setSuccessMessage("");
+        }, 3000);
+        setErrorMessage("");
+      }
+    } catch (err) {
+      setErrorMessage("❌ Failed to create task");
+      setSuccessMessage("");
+      console.error(err);
+    }
   };
   const isFormValid = () => {
-    return title && authorUserId && !(id !== null || projectId);
+    const hasProject = id != null || projectId.trim() !== "";
+    return Boolean(title.trim() && authorUserId.trim() && hasProject);
   };
 
   const inputStyles =
     "w-full rounded border border-gray-300 p-2 shadow-sm dark:border-dark-tertiary dark:bg-dark-tertiary dark:text-white dark:focus:outline-none";
 
   const selectStyles =
-    "mb-4 block w-full rounded border border-fray-300 px-3 py-2 dark:border-dark-tertiary dark:bg-dark-tertiary dark:text-white dark:focus:outline-none";
+    "mb-4 block w-full rounded border border-gray-300 px-3 py-2 dark:border-dark-tertiary dark:bg-dark-tertiary dark:text-white dark:focus:outline-none";
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} name="Create New Task">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      name="Create New Task"
+      error={errorMessage}
+      success={successMessage}
+    >
       <form
         className="mt-4 space-y-6"
         onSubmit={(e) => {
@@ -153,6 +179,8 @@ const ModalNewTask = ({ isOpen, onClose, id = null }: Props) => {
         >
           {isLoading ? "Creating..." : "Create Task"}
         </button>
+        {errorMessage && errorMessage}
+        {successMessage && successMessage}
       </form>
     </Modal>
   );

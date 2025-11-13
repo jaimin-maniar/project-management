@@ -3,7 +3,7 @@ import Header from "@/components/Header";
 import { dataGridSxStyles } from "@/lib/utils";
 import { useGetTasksQuery } from "@/state/api";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
-type Props = {
+type BoardProps = {
   id: string;
   setIsModalNewTaskOpen: (isOpen: boolean) => void;
 };
@@ -64,7 +64,7 @@ const columns: GridColDef[] = [
   },
 ];
 
-const TableView = ({ id, setIsModalNewTaskOpen }: Props) => {
+const TableView = ({ id, setIsModalNewTaskOpen }: BoardProps) => {
   const isDarkMode = useAppSelector((state) => state.global.isDarkMode);
   const {
     data: tasks,
