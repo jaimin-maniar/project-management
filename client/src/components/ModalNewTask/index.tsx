@@ -73,13 +73,7 @@ const ModalNewTask = ({ isOpen, onClose, id = null }: Props) => {
     "mb-4 block w-full rounded border border-gray-300 px-3 py-2 dark:border-dark-tertiary dark:bg-dark-tertiary dark:text-white dark:focus:outline-none";
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      name="Create New Task"
-      error={errorMessage}
-      success={successMessage}
-    >
+    <Modal isOpen={isOpen} onClose={onClose} name="Create New Task">
       <form
         className="mt-4 space-y-6"
         onSubmit={(e) => {

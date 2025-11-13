@@ -8,11 +8,9 @@ type Props = {
   isOpen: boolean;
   onClose: () => void;
   name: string;
-  error: string;
-  success: string;
 };
 
-const Modal = ({ children, isOpen, onClose, name, error, success }: Props) => {
+const Modal = ({ children, isOpen, onClose, name }: Props) => {
   if (!isOpen) return null;
   return ReactDOM.createPortal(
     <div className="fixed inset-0 flex h-full w-full items-center justify-center overflow-y-auto bg-black/40 p-4">
